@@ -534,6 +534,21 @@ describe('douyin 归一化（真实响应的结构）', () => {
     const other = norm.notice({ nid_str: '3', type: 9009, create_time: 1790399397, aweme_id: '0', interactive_notice: { content: '推荐了你的图文', from_user: [user] } })
     expect(other).toMatchObject({ type: 'system', user: { id: SEC_UID }, target: null, text: '推荐了你的图文' })
   })
+
+  it('商品详情图片兼容 string/object/array（保留生产 asArray 补丁）', async () => {
+    const norm = await import('../src/platforms/douyin/web/normalize.js')
+    const body = {
+      detail_info: {
+        title: '离线假数据',
+        title_image: 'https://example.com/title.jpg',
+        detail_imgs: { url_list: ['https://example.com/detail.jpg'] },
+      },
+      promotions: [{ product_id: 'fake-product', shop_id: 'fake-shop' }],
+    }
+    const item = norm.productDetail(body, 'fake-promotion')
+    expect(item.media.map((m) => m.url)).toEqual(['https://example.com/title.jpg', 'https://example.com/detail.jpg'])
+    expect(() => norm.productDetail({ detail_info: { title_image: null, detail_imgs: null } }, 'fake-promotion')).not.toThrow()
+  })
 })
 
 describe('douyin 缺 UIFID 时自动补上', () => {

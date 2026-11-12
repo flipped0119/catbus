@@ -301,7 +301,9 @@ export function productUrl(promotionId: unknown, productId?: unknown, shopId?: u
 export function productDetail(body: any, promotionId: string): Item {
   const info = body?.detail_info ?? body?.data?.detail_info ?? {}
   const promo = body?.promotions?.[0] ?? body?.promotion ?? {}
-  const imgs: string[] = [...(info.title_image ?? []), ...(info.detail_imgs ?? [])].map((x: any) => (typeof x === 'string' ? x : x?.url_list?.[0])).filter(Boolean)
+  // 生产兼容：上游可能把单张图片返回为 string/object，而不是数组（T-2596，勿在升级时回退）。
+  const asArray = (v: any): any[] => v == null ? [] : Array.isArray(v) ? v : [v]
+  const imgs: string[] = [...asArray(info.title_image), ...asArray(info.detail_imgs)].map((x: any) => (typeof x === 'string' ? x : x?.url_list?.[0])).filter(Boolean)
   return n.item(
     {
       id: promotionId,

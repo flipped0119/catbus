@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { Readable } from 'node:stream'
+import { describe, expect, it, vi } from 'vitest'
 import { getCurrent, listAccounts, newCredential, readCredential, setCurrent, writeCredential } from '../src/core/auth-store.js'
-import { accountNameFor, finishLogin } from '../src/core/login.js'
+import { accountNameFor, finishLogin, smsLogin, smsState } from '../src/core/login.js'
 import type { HandlerContext } from '../src/core/registry.js'
 import type { AccountUser } from '../src/core/schemas.js'
 import { findPlatform } from '../src/platforms/index.js'
@@ -89,6 +90,57 @@ describe('finishLogin（AGENTS 5.3）', () => {
     expect(accountNameFor({ id: 'guest', name: null, url: null, avatar: null }, new Set())).toBe('guest-2')
     const long = accountNameFor({ id: 'x'.repeat(40), name: null, url: null, avatar: null }, new Set(['x'.repeat(32)]))
     expect(long).toBe('x'.repeat(30) + '-2')
+  })
+})
+
+describe('smsLogin 的 stdin 秘密选项（T-2975）', () => {
+  function stdin(text: string) {
+    const stream = Object.assign(Readable.from([text]), { isTTY: false })
+    return vi.spyOn(process, 'stdin', 'get').mockReturnValue(stream as unknown as typeof process.stdin)
+  }
+
+  it('--phone - 从 stdin 读取单行手机号，不把值放进 argv', async () => {
+    const secret = ['190', '0000', '0000'].join('')
+    const mock = stdin(secret + '\n')
+    try {
+      const { ctx } = loginCtx('default', { phone: '-' })
+      let seen = ''
+      const result = await smsLogin(ctx, {
+        send: async (phone) => { seen = phone; return { phone } },
+        verify: async () => { throw new Error('本用例不应进入 verify') },
+      })
+      expect(seen).toBe(secret)
+      expect(ctx.options.phone).toBe(secret)
+      expect(result).toMatchObject({ sent: true })
+    } finally {
+      mock.mockRestore()
+    }
+  })
+
+  it('--code - 从 stdin 读取并同步 ctx.options，供平台 verify/select 使用', async () => {
+    const secret = ['000', '000'].join('')
+    const mock = stdin(secret + '\n')
+    try {
+      const { ctx } = loginCtx('default', { code: '-' })
+      await smsState.save(ctx, { phone: 'stored-offline-value' })
+      let seen = ''
+      await smsLogin(ctx, {
+        send: async () => { throw new Error('本用例不应进入 send') },
+        verify: async (_state, code) => {
+          seen = code
+          expect(ctx.options.code).toBe(secret)
+          return { platform: 'xhs' } as any
+        },
+      })
+      expect(seen).toBe(secret)
+    } finally {
+      mock.mockRestore()
+    }
+  })
+
+  it('phone/code 不共用一个 stdin，避免把两项拼进日志或参数', async () => {
+    const { ctx } = loginCtx('default', { phone: '-', code: '-' })
+    await expect(smsLogin(ctx, { send: async () => ({}), verify: async () => ({}) as any })).rejects.toMatchObject({ code: 'USAGE' })
   })
 })
 

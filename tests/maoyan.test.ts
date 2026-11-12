@@ -86,6 +86,7 @@ describe('maoyan 平台（web）', () => {
         url: 'https://show.maoyan.com/qqw#/detail/514992',
         title: '岳云鹏孙越相声专场演出',
         text: '分类：相声\n演出者：岳云鹏、孙越\n开售：已开售\n开售时间：2026-10-29T10:18:00+08:00',
+        onSaleTime: '2026-10-29T10:18:00+08:00',
         author: {
           id: '11399',
           name: '岳云鹏',
@@ -171,6 +172,7 @@ describe('maoyan 平台（web）', () => {
         url: 'https://show.maoyan.com/qqw#/detail/514992',
         title: expect.stringContaining('岳云鹏孙越相声专场演出'),
         text: '时间：2026.12.12 19:30 周六\n城市：北京\n场馆：北京展览馆剧场（官方售票）（西直门外大街135号）\n票价：380、1680\n状态：立即预定\n开售时间：2026-10-29T10:18:00+08:00',
+        onSaleTime: '2026-10-29T10:18:00+08:00',
         author: null,
         price: { amount: 380, currency: 'CNY' },
         status: null,
@@ -183,6 +185,18 @@ describe('maoyan 平台（web）', () => {
       const r = await cli('maoyan', 'item', 'get', '514992', '--raw')
       expect(r.env.data).toMatchObject({ baseProjectVO: { cityId: 2 }, shopVO: { shopId: '2056138' } })
     })
+  })
+
+  it('onSaleTime 缺失、空串或 0 时结构化字段为 null，文本不伪造开售时间', async () => {
+    const { showItem, detailItem } = await import('../src/platforms/maoyan/web/normalize.js')
+    for (const value of [undefined, '', 0]) {
+      const feed = showItem({ projectId: 'fake-feed', projectName: '测试', onSaleTime: value })
+      expect(feed.onSaleTime).toBeNull()
+      expect(feed.text ?? '').not.toContain('开售时间')
+      const detail = detailItem({ baseProjectVO: { performanceId: 'fake-item' }, saleRemindVO: { onSaleTime: value } })
+      expect(detail.onSaleTime).toBeNull()
+      expect(detail.text ?? '').not.toContain('开售时间')
+    }
   })
 
   it('演出参数：projectId、网页链接、App 跳转链接', () => {

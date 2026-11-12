@@ -277,6 +277,14 @@ export const smsState = {
 /** 短信登录的中间结果：非 TTY 分步时返回，`sent` 之外的字段平台自定义（如快手 sms 多用户的 `users`）。 */
 export type SmsIntermediate = { sent: true } & Record<string, unknown>
 
+/** `--phone -` / `--code -`：秘密只经 stdin 传入，避免出现在 argv、进程列表和 shell 历史中。 */
+async function smsSecret(value: unknown, label: string): Promise<string | undefined> {
+  if (value !== '-') return value as string | undefined
+  const secret = (await readStreamText(process.stdin)).trim()
+  if (!secret || /[\r\n]/.test(secret)) throw new CatbusError('USAGE', `${label}必须从 stdin 传入单行非空值`)
+  return secret
+}
+
 /**
  * 短信登录的通用流程。平台提供 send（发验证码，返回需要保存的中间态）和 verify（用验证码完成登录）。
  * 平台验证成功后还要用户选账号的（如快手手机号下有多个账号），额外提供 select（`--user <id>` 完成登录），
@@ -291,8 +299,14 @@ export async function smsLogin<S extends Record<string, unknown>>(
     select?(state: S, userId: string): Promise<Account | SmsIntermediate>
   },
 ): Promise<Account | SmsIntermediate> {
-  const phone = ctx.options.phone as string | undefined
-  const code = ctx.options.code as string | undefined
+  if (ctx.options.phone === '-' && ctx.options.code === '-') {
+    throw new CatbusError('USAGE', '--phone 与 --code 不能同时从同一个 stdin 读取，请分步执行')
+  }
+  const phone = await smsSecret(ctx.options.phone, '手机号')
+  const code = await smsSecret(ctx.options.code, '短信验证码')
+  // 平台的 select 分支直接读 ctx.options.code；标准化后也写回，但不打印该值。
+  if (ctx.options.phone === '-') ctx.options.phone = phone
+  if (ctx.options.code === '-') ctx.options.code = code
   const user = (ctx.options.user as string | undefined)?.trim()
   const p = ctx.platform.id
   const cmd = `catbus ${p} auth login --method sms${ctx.account ? ` -a ${ctx.account}` : ''}${endpointFlag(ctx.endpoint)}`

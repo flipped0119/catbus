@@ -658,7 +658,48 @@ describe('youtube 平台（web）', () => {
       expect(guest.env.ok).toBe(true)
     })
 
-    describe('cookie 轮换（AGENTS 5.8）', () => {
+    describe('下游禁用 cookie 轮换（T-2975）', () => {
+      const EMPTY = { responseContext: { serviceTrackingParams: [{ service: 'GFEEDBACK', params: [{ key: 'logged_in', value: '0' }] }] }, contents: {} }
+      const credential = () => JSON.parse(readFileSync(join(home.dir, 'auth', 'youtube', 'web', 'default.json'), 'utf8'))
+
+      it('logged_in=0 直接报 AUTH_EXPIRED：不请求 RotateCookies、不重试、不改凭证', async () => {
+        await login()
+        const before = credential()
+        const r = await withYt({
+          browse: () => EMPTY,
+          '/RotateCookiesPage': () => { throw new Error('禁用后不应请求 RotateCookiesPage') },
+          '/RotateCookies': () => { throw new Error('禁用后不应请求 RotateCookies') },
+        }, async (calls) => {
+          const out = await cli('youtube', 'feed', 'list')
+          expect(out.env.error.code).toBe('AUTH_EXPIRED')
+          expect(calls.map((c) => c.path)).toEqual(['browse'])
+          expect(calls.filter((c) => c.path.startsWith('/RotateCookies'))).toHaveLength(0)
+          return out
+        })
+        expect(r.code).toBe(3)
+        expect(credential()).toEqual(before)
+      })
+
+      it('auth status 不轮换 cookie：只在线校验，凭证逐字节不变', async () => {
+        await login()
+        const before = credential()
+        const r = await withYt({
+          'account/account_menu': () => ACCOUNT_MENU,
+          '/RotateCookiesPage': () => { throw new Error('禁用后不应请求 RotateCookiesPage') },
+          '/RotateCookies': () => { throw new Error('禁用后不应请求 RotateCookies') },
+        }, async (calls) => {
+          const out = await cli('youtube', 'auth', 'status')
+          expect(out.env.data.logged_in).toBe(true)
+          expect(calls.filter((c) => c.path.startsWith('/RotateCookies'))).toHaveLength(0)
+          return out
+        })
+        expect(r.code).toBe(0)
+        expect(credential()).toEqual(before)
+      })
+    })
+
+    // 保留上游行为用例作对照，但下游明确禁用 rotate，不能把这些用例的期望值当作候选行为。
+    describe.skip('上游 cookie 轮换（当前下游禁用）', () => {
       // 2026-11-10 真机抓包（裁剪）：RotateCookiesPage 的 HTML 与 /RotateCookies 的响应
       const ROTATE_PAGE = `<!DOCTYPE html><html><body><script src='https://www.gstatic.com/_/mss/boq-identity/_/js/k=boq-identity.IdentityRotateCookiesHttp.en_GB.pwe7zYN1lhM.2018.O/am=AAAADA/d=1/rs=AOaEmlFQJpa9yNySJoEA6RNlYHR07LrTOA/m=hfcr' nonce="DLCQJSefrfFPHzLL739oFQ"></script><script nonce="DLCQJSefrfFPHzLL739oFQ">init('2793357806803385843',  0.0 ,  1.0 ,  0.0 ,  600.0 )</script></body></html>`
       const ROTATE_OUT = `)]}'\n\n[["identity.hfcr",600],["di",63]]`

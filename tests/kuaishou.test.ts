@@ -1023,10 +1023,12 @@ describe('kuaishou 短信多用户（官方 result 100110031：手机号下有�
     try {
       const { authLogin } = await import('../src/platforms/kuaishou/web/commands.js')
       const ctx = makeCtx({ platform: 'kuaishou', options })
+      const logs: string[] = []
+      ctx.log.info = (line: string) => { logs.push(line) }
       const result = (await authLogin(ctx)) as any
       const paths = requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)
       const bodies = requests.map((r) => (typeof r.body === 'string' ? r.body : ''))
-      return { result, paths, bodies, requests }
+      return { result, paths, bodies, requests, logs }
     } finally {
       restoreSender()
     }
@@ -1093,13 +1095,25 @@ describe('kuaishou 短信多用户（官方 result 100110031：手机号下有�
     expect(existsSync(statePath())).toBe(false)
   })
 
+  it('选择账号失败的错误 detail 不带上游原始响应（eafe22a）', async () => {
+    seedSmsState({ users: [{ id: '20001', name: '乙号', avatar: null }], multiUserToken: 'fake-multi-token' })
+    const err = await replaySms({ method: 'sms', user: '20001' }, {
+      'OPTIONS /s/w/c': [loadCase('kuaishou', 'qrcode_login_flow').responses[0]!],
+      'POST /s/w/c': [loadCase('kuaishou', 'qrcode_login_flow').responses[1]!],
+      'POST /pass/kuaishou/login/multiUserToken': [{ status: 200, headers: { 'content-type': 'application/json' }, body: { result: 400099, error_msg: '离线失败', raw_marker: 'must-not-leak' } }],
+    }).then(() => null, (e) => e)
+    expect(err).toMatchObject({ code: 'AUTH_REQUIRED' })
+    expect(err.detail).toEqual({ stage: 'multiUserToken', result: 400099 })
+    expect(JSON.stringify(err)).not.toContain('must-not-leak')
+  })
+
   /** 手排 400013 的 captchaUrl：官方验证页的形制，unionToken / unLoginUserId 等都在 query 里（随请求变化，测试用假值）。 */
   const ZT_CAPTCHA_URL = 'https://app.m.kuaishou.com/zt/unified/tools/verification/verify-sms-unified?unionToken={{SECRET_jqmbctsu}}&useVoice=true&unLoginUserId=fake-uid-1'
 
   it('--user <id> 撞统一安全验证（400013）：先不拨号，挂起，由用户显式发起', async () => {
     const qc = loadCase('kuaishou', 'qrcode_login_flow').responses
     seedSmsState({ users: MULTI_USERS.map((u) => ({ id: String(u.userId), name: u.account, avatar: (u as { avatar?: string }).avatar ?? null })), multiUserToken: 'fake-multi-token' })
-    const { result, paths, requests } = await replaySms({ method: 'sms', user: '20002' }, {
+    const { result, paths, requests, logs } = await replaySms({ method: 'sms', user: '20002' }, {
       'OPTIONS /s/w/c': [qc[0]!],
       'POST /s/w/c': [qc[1]!],
       'POST /pass/kuaishou/login/multiUserToken': [{ status: 200, headers: { 'content-type': 'application/json' }, body: { result: 400013, reason: '当前请求存在风险，请稍后重试!', captchaType: 13, errorCode: 6116, captchaUrl: ZT_CAPTCHA_URL } }],
@@ -1114,6 +1128,8 @@ describe('kuaishou 短信多用户（官方 result 100110031：手机号下有�
     expect(saved.data.zt).toMatchObject({ userId: '20002' })
     expect(saved.data.multiUserToken).toBe('fake-multi-token')
     expect(saved.data.zt.captchaUrl).toBe(ZT_CAPTCHA_URL)
+    // WebUI 只从这条 stderr 提示提取链接；普通日志和错误 detail 不重复保存它。
+    expect(logs.some((line) => line.includes('快手人机验证链接') && line.includes(ZT_CAPTCHA_URL))).toBe(true)
   })
 
   it('--user <id>（待验证态）不带 --code：发起语音验证码电话，再挂一次', async () => {
@@ -1154,11 +1170,14 @@ describe('kuaishou 短信多用户（官方 result 100110031：手机号下有�
       multiUserToken: 'fake-multi-token',
       zt: { userId: '20002', captchaUrl: ZT_CAPTCHA_URL },
     })
-    await expect(replaySms({ method: 'sms', user: '20002' }, {
+    const err = await replaySms({ method: 'sms', user: '20002' }, {
       'OPTIONS /s/w/c': [loadCase('kuaishou', 'qrcode_login_flow').responses[0]!],
       'POST /s/w/c': [loadCase('kuaishou', 'qrcode_login_flow').responses[1]!],
       'POST /pass/ztUnionVerify/sms/unlogin/sendByUser': [{ status: 200, headers: { 'content-type': 'application/json' }, body: { result: 2120, error_msg: '请求过于频繁' } }],
-    })).rejects.toMatchObject({ code: 'RISK_CONTROL', detail: { kind: 'blocked' } })
+    }).then(() => null, (e) => e)
+    expect(err).toMatchObject({ code: 'RISK_CONTROL' })
+    expect(err.detail).toEqual({ kind: 'blocked', sendResult: 2120 })
+    expect(JSON.stringify(err.detail)).not.toContain('captchaUrl')
     expect(existsSync(statePath())).toBe(true)
   })
 

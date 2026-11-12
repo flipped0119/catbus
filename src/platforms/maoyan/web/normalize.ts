@@ -26,6 +26,11 @@ export const projectUrl = (id: string) => `https://show.maoyan.com/qqw#/detail/$
 
 const STATS = () => ({ views: null, likes: null, comments: null, collects: null, shares: null })
 
+/** 猫眼在通用 Item 之外保留结构化开售时间；文本里的「开售时间」仍用于人工阅读。 */
+export interface MaoyanItem extends Item {
+  onSaleTime: string | null
+}
+
 function price(v: unknown): Price | null {
   const n = Number(v)
   return v != null && v !== '' && Number.isFinite(n) ? { amount: n, currency: 'CNY' } : null
@@ -42,9 +47,10 @@ function lines(pairs: [string, unknown][]): string | null {
 }
 
 /** hotShows 的 recordList 条目。 */
-export function showItem(r: any): Item {
+export function showItem(r: any): MaoyanItem {
   const id = String(r.projectId)
   const performers = (r.celebrityVOList ?? []).map((c: any) => c.celebrityName).filter(Boolean)
+  const onSaleTime = n.time(r.onSaleTime)
   return withRaw(
     {
       id,
@@ -55,8 +61,9 @@ export function showItem(r: any): Item {
         ['分类', r.categoryName],
         ['演出者', performers.join('、')],
         ['开售', r.onSaleTimeDisplay],
-        ['开售时间', n.time(r.onSaleTime)],
+        ['开售时间', onSaleTime],
       ]),
+      onSaleTime,
       author: performer(r.celebrityVOList?.[0]),
       created_at: null,
       cover: r.posterUrl ?? null,
@@ -99,11 +106,12 @@ function showLines(shows: any[]): string[] {
 }
 
 /** project/detail 的 data；`shows` 是 `--tickets` 查到的场次和票档，放进原始对象。 */
-export function detailItem(d: any, shows?: any[]): Item {
+export function detailItem(d: any, shows?: any[]): MaoyanItem {
   const b = d.baseProjectVO ?? {}
   const shop = d.shopVO ?? {}
   const id = String(b.performanceId)
   const venue = shop.shopName ? `${shop.shopName}${shop.address ? `（${shop.address}）` : ''}` : null
+  const onSaleTime = n.time(d.saleRemindVO?.onSaleTime)
   return withRaw(
     {
       id,
@@ -118,12 +126,13 @@ export function detailItem(d: any, shows?: any[]): Item {
             ['场馆', venue],
             ['票价', (d.priceVO?.sellPriceList ?? []).join('、')],
             ['状态', b.buttonContext?.message],
-            ['开售时间', n.time(d.saleRemindVO?.onSaleTime)],
+            ['开售时间', onSaleTime],
           ]),
           ...showLines(shows ?? []),
         ]
           .filter(Boolean)
           .join('\n') || null,
+      onSaleTime,
       author: null,
       created_at: null,
       cover: b.posterUrl ?? null,

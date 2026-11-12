@@ -289,6 +289,8 @@ async function loginSmsUser(
     multiUserToken: state.multiUserToken,
     zt: { userId, captchaUrl: String(data.captchaUrl) },
   }))
+  // WebUI 从 stderr 消费这条敏感链接；bridge 必须结构化提取，不得写入普通日志（T-2975）。
+  ctx.log.info(`快手人机验证链接（敏感，请勿转发）：${String(data.captchaUrl)}`)
   ctx.log.info(`快手要求安全验证（${info.useVoice ? '语音' : '短信'}验证码）。发起验证码：${cmd} --user ${userId}（再次执行、不带 --code）；提交：加上 --code <验证码>`)
 
   if (!interactive()) return { sent: true, verify: true, phone: state.phone }
@@ -299,7 +301,7 @@ async function loginSmsUser(
       const r = await api.ztVerifySendCode(k, info)
       if (r?.result !== 1) {
         throw new CatbusError('RISK_CONTROL', `发起安全验证失败：${r?.error_msg ?? r?.result}`, {
-          detail: { kind: 'blocked', captchaUrl: data.captchaUrl, sendResult: r?.result ?? null },
+          detail: { kind: 'blocked', sendResult: r?.result ?? null },
         })
       }
       ctx.log.info('已发起，手机会收到语音验证码电话')
@@ -396,7 +398,7 @@ async function smsFlow(ctx: Ctx) {
           const r = await api.ztVerifySendCode(session, info)
           if (r?.result !== 1) {
             throw new CatbusError('RISK_CONTROL', `发起语音验证码失败：${r?.error_msg ?? r?.result}`, {
-              detail: { kind: 'blocked', captchaUrl: state.zt.captchaUrl, sendResult: r?.result ?? null },
+              detail: { kind: 'blocked', sendResult: r?.result ?? null },
             })
           }
           ctx.log.info(`语音/短信验证码已发起（${info.useVoice ? '语音' : '短信'}）。提交验证码：${cmd} --user ${userId} --code <验证码>`)

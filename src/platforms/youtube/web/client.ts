@@ -23,6 +23,11 @@ const CONFIG_TTL_MS = 12 * 3600 * 1000
 export const ROTATE_INTERVAL_DEFAULT = 600
 export const ROTATE_INTERVAL_MIN = 60
 
+/** 本部署不允许 rotate；不是配置开关，后续启用必须重新审查。 */
+function downstreamCookieRotateDisabled(): boolean {
+  return true
+}
+
 /** 发请求要用的页面配置，缓存在凭证的 device.ytcfg 里，随凭证由 core 落盘。 */
 interface YtConfig {
   clientVersion: string
@@ -244,6 +249,10 @@ export class YtClient {
    * `reason` 只进日志。
    */
   async rotateCookies(reason: string): Promise<boolean> {
+    // 下游硬门禁（T-2975）：cookie rotate 会发起额外请求并改写凭证，当前明确不启用。
+    // 保留上游实现仅供后续另审；auth status 与 logged_in=0 两个调用点都在这里被截断。
+    // 用函数返回硬编码门禁，避免 TS 把后续上游实现分析成 unreachable 并改变 narrowing。
+    if (downstreamCookieRotateDisabled()) return false
     if (!this.loggedIn) return false
     const next = this.ctx.credential.device.cookieRotate as { nextAttemptAt?: number } | undefined
     if (next?.nextAttemptAt && next.nextAttemptAt > rand.now()) {
