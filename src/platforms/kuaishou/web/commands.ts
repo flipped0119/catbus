@@ -2,7 +2,7 @@ import { basename, extname } from 'node:path'
 import { endpointFlag, GUEST } from '../../../core/auth-store.js'
 import { CatbusError } from '../../../core/errors.js'
 import { downloadMedia, type LocalMedia, readMedia } from '../../../core/files.js'
-import { cookieCredential, finishLogin, freshCredential, interactive, loginContext, poll, prompt, showQrcode, type SmsIntermediate, smsLogin, smsState } from '../../../core/login.js'
+import { cookieCredential, finishLogin, freshCredential, interactive, loginContext, poll, prompt, showLink, showQrcode, type SmsIntermediate, smsLogin, smsState } from '../../../core/login.js'
 import * as n from '../../../core/normalize.js'
 import * as rand from '../../../core/rand.js'
 import type { HandlerContext } from '../../../core/registry.js'
@@ -289,11 +289,16 @@ async function loginSmsUser(
     multiUserToken: state.multiUserToken,
     zt: { userId, captchaUrl: String(data.captchaUrl) },
   }))
-  // WebUI 从 stderr 消费这条敏感链接；bridge 必须结构化提取，不得写入普通日志（T-2975）。
-  ctx.log.info(`快手人机验证链接（敏感，请勿转发）：${String(data.captchaUrl)}`)
+  // 非 TTY 由 WebUI 从 stdout JSON 的 data.captchaUrl 消费；stderr/info 不携带链接或其秘密参数。
+  // TTY/TUI 交互路径才显示链接；showLink 不受 -q 影响，因为这一步必须由用户操作。
   ctx.log.info(`快手要求安全验证（${info.useVoice ? '语音' : '短信'}验证码）。发起验证码：${cmd} --user ${userId}（再次执行、不带 --code）；提交：加上 --code <验证码>`)
-
-  if (!interactive()) return { sent: true, verify: true, phone: state.phone }
+  if (!interactive()) return { sent: true, verify: true, phone: state.phone, captchaUrl: String(data.captchaUrl) }
+  showLink(
+    String(data.captchaUrl),
+    '打开链接完成人机验证；链接含短期凭证，请勿转发。',
+    `快手人机验证链接（敏感，请勿转发）：${String(data.captchaUrl)}`,
+    '快手人机验证',
+  )
 
   for (;;) {
     const code = (await prompt('回车发起语音验证码电话（未发起/没接到时），或输入收到的语音/短信验证码：')).trim()
